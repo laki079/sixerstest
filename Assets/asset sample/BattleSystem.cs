@@ -1,247 +1,160 @@
 ﻿using System.Collections;
 using System.Collections.Generic;
-using System.Linq;
 using UnityEngine;
 using UnityEngine.UI;
 
-public enum BattleState { START, SELECTION, RESOLUTION, WON, LOST }
-
-/// <summary>
-/// One unit's chosen move for this round: the card value played and who it targets.
-/// </summary>
-public struct CombatAction
-{
-    public Unit actor;
-    public int cardValue;
-    public Unit target;
-
-    public CombatAction(Unit actor, int cardValue, Unit target)
-    {
-        this.actor = actor;
-        this.cardValue = cardValue;
-        this.target = target;
-    }
-}
+public enum BattleState { START, SELECTION, RESOLVE, WON, LOST }
 
 public class BattleSystem : MonoBehaviour
 {
-    [Header("Party setup")]
-    public List<Unit> playerParty = new List<Unit>();
-    public List<Unit> enemyParty = new List<Unit>();
+	public GameObject playerPrefab;
+	public GameObject enemyPrefab;
 
-    public Text dialogueText;
+	public Transform playerBattleStation;
+	public Transform enemyBattleStation;
 
-    public BattleState state;
+	Unit playerUnit;
+	Unit enemyUnit;
 
-    // --- Selection-phase bookkeeping ---
-    private List<CombatAction> pendingActions = new List<CombatAction>();
-    private int playerSelectIndex;      // which living party member is currently choosing
-    private int pendingCardValue = -1;  // card the current party member has picked, awaiting a target
+	public Text dialogueText;
 
-    void Start()
-    {
-        state = BattleState.START;
-        StartCoroutine(SetupBattle());
-    }
+	public BattleHUD playerHUD;
+	public BattleHUD enemyHUD;
 
-    IEnumerator SetupBattle()
-    {
-        // Units are already placed in the scene and assigned to playerParty/
-        // enemyParty via the Inspector - we just need to build each one's
-        // runtime deck from its startingDeck before anyone can select cards.
-        foreach (Unit unit in playerParty.Concat(enemyParty))
-        {
-            unit.InitDeck();
-            unit.hud?.SetHUD(unit);
-        }
+	public BattleState state;
 
-        dialogueText.text = "The battle begins!";
+	// Set by the UI when the player taps a card button (see OnCardButton).
+	private int playerSelectedCard = -1;
+	private bool playerHasSelected = false;
 
-        yield return new WaitForSeconds(1.5f);
+	void Start()
+	{
+		state = BattleState.START;
+		StartCoroutine(SetupBattle());
+	}
 
-        BeginSelectionPhase();
-    }
+	IEnumerator SetupBattle()
+	{
+		GameObject playerGO = Instantiate(playerPrefab, playerBattleStation);
+		playerUnit = playerGO.GetComponent<Unit>();
 
-    // ---------------------------------------------------------
-    // SELECTION PHASE
-    // ---------------------------------------------------------
+		GameObject enemyGO = Instantiate(enemyPrefab, enemyBattleStation);
+		enemyUnit = enemyGO.GetComponent<Unit>();
 
-    void BeginSelectionPhase()
-    {
-        state = BattleState.SELECTION;
-        pendingActions.Clear();
-        pendingCardValue = -1;
+		dialogueText.text = "A wild " + enemyUnit.unitName + " approaches...";
 
-        // Enemies choose instantly: random card from their own hand, random
-        // living player-party target. Swap this out later for smarter/
-        // personality-based AI without touching the rest of the flow.
-        foreach (Unit enemy in enemyParty.Where(e => e.IsAlive))
-        {
-            int card = enemy.deck.GetRandomCardValue();
-            enemy.deck.PlayCard(card);
+		playerHUD.SetHUD(playerUnit);
+		enemyHUD.SetHUD(enemyUnit);
 
-            Unit target = GetRandomLivingTarget(playerParty);
-            if (target != null)
-                pendingActions.Add(new CombatAction(enemy, card, target));
-        }
+		yield return new WaitForSeconds(2f);
 
-        playerSelectIndex = 0;
-        PromptNextPlayerSelection();
-    }
+		BeginSelectionPhase();
+	}
 
-    void PromptNextPlayerSelection()
-    {
-        // Skip any party members who are already dead.
-        while (playerSelectIndex < playerParty.Count && !playerParty[playerSelectIndex].IsAlive)
-            playerSelectIndex++;
+	void BeginSelectionPhase()
+	{
+		state = BattleState.SELECTION;
+		playerHasSelected = false;
+		playerSelectedCard = -1;
 
-        if (playerSelectIndex >= playerParty.Count)
-        {
-            // Everyone on the player side has chosen - move to resolution.
-            StartCoroutine(ResolveRound());
-            return;
-        }
+		dialogueText.text = "Choose your attack:";
 
-        Unit current = playerParty[playerSelectIndex];
-        dialogueText.text = $"{current.unitName}, choose your attack!";
+		// UI should call RefreshHandButtons() (or similar) here to draw
+		// buttons for playerUnit.GetHand() - left out of this sketch since
+		// it depends on your button prefab setup.
+	}
 
-        // UI hook point: display current.deck.Hand as the available card
-        // buttons for this unit. Each button's onClick should call
-        // SelectCard(value) below.
-    }
+	// Wire this up to each of the 6 card buttons, passing the card's number.
+	public void OnCardButton(int cardNumber)
+	{
+		if (state != BattleState.SELECTION || playerHasSelected)
+			return;
 
-    /// <summary>
-    /// Call this from a card-value button (wired to the current party
-    /// member's hand). Stores the choice and waits for a target selection.
-    /// </summary>
-    public void SelectCard(int cardValue)
-    {
-        if (state != BattleState.SELECTION) return;
+		if (!playerUnit.ChooseCard(cardNumber))
+			return; // card wasn't in hand, ignore
 
-        Unit current = playerParty[playerSelectIndex];
-        if (!current.deck.CanPlay(cardValue))
-        {
-            Debug.LogWarning($"{current.unitName} doesn't have card {cardValue} in hand.");
-            return;
-        }
+		playerSelectedCard = cardNumber;
+		playerHasSelected = true;
 
-        pendingCardValue = cardValue;
-        dialogueText.text = $"{current.unitName}, choose a target!";
+		StartCoroutine(ResolveTurn());
+	}
 
-        // UI hook point: highlight enemyParty as selectable targets. Each
-        // target's click/button should call SelectTarget(unit) below.
-    }
+	IEnumerator ResolveTurn()
+	{
+		state = BattleState.RESOLVE;
 
-    /// <summary>
-    /// Call this after SelectCard, once the player has clicked/tapped a
-    /// target unit. Finalizes this party member's action and moves on.
-    /// </summary>
-    public void SelectTarget(Unit target)
-    {
-        if (state != BattleState.SELECTION || pendingCardValue == -1) return;
-        if (target == null || !target.IsAlive) return;
+		// Enemy AI picks now (v0.1: uniformly random from its hand).
+		int enemyCard = enemyUnit.ChooseRandomCard();
+		int playerCard = playerSelectedCard;
 
-        Unit current = playerParty[playerSelectIndex];
+		dialogueText.text = playerUnit.unitName + " plays " + playerCard +
+			", " + enemyUnit.unitName + " plays " + enemyCard + "!";
+		yield return new WaitForSeconds(1.5f);
 
-        // Card is spent the instant it's chosen, regardless of outcome.
-        current.deck.PlayCard(pendingCardValue);
-        pendingActions.Add(new CombatAction(current, pendingCardValue, target));
+		// Same number: total whiff, no damage, both cards already spent.
+		if (playerCard == enemyCard)
+		{
+			dialogueText.text = "Both attacks collide and cancel out!";
+			yield return new WaitForSeconds(1.5f);
+			BeginSelectionPhase();
+			yield break;
+		}
 
-        pendingCardValue = -1;
-        playerSelectIndex++;
-        PromptNextPlayerSelection();
-    }
+		// Lower number = faster = resolves first.
+		Unit firstUnit = playerCard < enemyCard ? playerUnit : enemyUnit;
+		Unit secondUnit = playerCard < enemyCard ? enemyUnit : playerUnit;
+		int firstCard = Mathf.Min(playerCard, enemyCard);
+		int secondCard = Mathf.Max(playerCard, enemyCard);
 
-    Unit GetRandomLivingTarget(List<Unit> party)
-    {
-        List<Unit> living = party.Where(u => u.IsAlive).ToList();
-        if (living.Count == 0) return null;
-        return living[Random.Range(0, living.Count)];
-    }
+		// First (faster) attack resolves.
+		yield return ApplyAttack(firstUnit, secondUnit, firstCard);
 
-    // ---------------------------------------------------------
-    // RESOLUTION PHASE
-    // ---------------------------------------------------------
+		if (secondUnit.IsDead())
+		{
+			dialogueText.text = secondUnit.unitName + " was defeated before it could act!";
+			yield return new WaitForSeconds(1.5f);
+			EndBattle(secondUnit);
+			yield break;
+		}
 
-    IEnumerator ResolveRound()
-    {
-        state = BattleState.RESOLUTION;
+		yield return new WaitForSeconds(1f);
 
-        // Group all chosen actions by card value. Any value picked by 2+
-        // units (any side, any target) whiffs entirely - target-agnostic.
-        var groupedByValue = pendingActions.GroupBy(a => a.cardValue);
+		// Second (slower) attack resolves normally, since the faster one didn't kill.
+		yield return ApplyAttack(secondUnit, firstUnit, secondCard);
 
-        List<CombatAction> resolvingActions = new List<CombatAction>();
+		if (firstUnit.IsDead())
+		{
+			EndBattle(firstUnit);
+			yield break;
+		}
 
-        foreach (var group in groupedByValue)
-        {
-            if (group.Count() >= 2)
-            {
-                dialogueText.text = $"Attacks of power {group.Key} collide and whiff!";
-                yield return new WaitForSeconds(1f);
-                // No damage - cards already spent, nothing further happens.
-            }
-            else
-            {
-                resolvingActions.Add(group.First());
-            }
-        }
+		BeginSelectionPhase();
+	}
 
-        // Global sort: lowest card value resolves first, across both sides.
-        resolvingActions = resolvingActions.OrderBy(a => a.cardValue).ToList();
+	IEnumerator ApplyAttack(Unit attacker, Unit defender, int cardValue)
+	{
+		dialogueText.text = attacker.unitName + " attacks for " + cardValue + "!";
+		defender.TakeDamage(cardValue);
 
-        foreach (CombatAction action in resolvingActions)
-        {
-            // The actor may have died earlier this round (killed by a
-            // faster attack) - their action never happens.
-            if (!action.actor.IsAlive)
-                continue;
+		if (defender == playerUnit)
+			playerHUD.SetHP(playerUnit.currentHP);
+		else
+			enemyHUD.SetHP(enemyUnit.currentHP);
 
-            // The target may also already be dead from an earlier, faster
-            // action this round - nothing to hit.
-            if (!action.target.IsAlive)
-                continue;
+		yield return new WaitForSeconds(1.5f);
+	}
 
-            dialogueText.text = $"{action.actor.unitName} uses {action.cardValue}!";
-            yield return new WaitForSeconds(0.75f);
-
-            bool died = action.target.TakeDamage(action.cardValue);
-            action.target.hud?.Refresh();
-
-            if (died)
-            {
-                dialogueText.text = $"{action.target.unitName} was defeated!";
-                yield return new WaitForSeconds(1f);
-            }
-            else
-            {
-                yield return new WaitForSeconds(0.5f);
-            }
-        }
-
-        CheckBattleEnd();
-    }
-
-    void CheckBattleEnd()
-    {
-        bool playerWiped = playerParty.All(u => !u.IsAlive);
-        bool enemyWiped = enemyParty.All(u => !u.IsAlive);
-
-        if (enemyWiped)
-        {
-            state = BattleState.WON;
-            dialogueText.text = "You won the battle!";
-        }
-        else if (playerWiped)
-        {
-            state = BattleState.LOST;
-            dialogueText.text = "Your party was defeated.";
-        }
-        else
-        {
-            // Neither side is wiped - loop back to the next round.
-            playerSelectIndex = 0;
-            BeginSelectionPhase();
-        }
-    }
+	void EndBattle(Unit defeatedUnit)
+	{
+		if (defeatedUnit == enemyUnit)
+		{
+			state = BattleState.WON;
+			dialogueText.text = "You won the battle!";
+		}
+		else
+		{
+			state = BattleState.LOST;
+			dialogueText.text = "You were defeated.";
+		}
+	}
 }
