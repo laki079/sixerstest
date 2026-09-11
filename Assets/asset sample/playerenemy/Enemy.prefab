@@ -45,10 +45,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 475d8d7ed9646504888a5702b5d7ed33, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  unitName: The Rock
+  unitName: "\uC544\uC800\uC528"
   unitLevel: 2
-  maxHP: 30
-  currentHP: 20
+  maxHP: 18
+  currentHP: 18
   startingDeck: 010000000200000003000000040000000500000006000000i
 --- !u!1 &5492376629917588543
 GameObject:

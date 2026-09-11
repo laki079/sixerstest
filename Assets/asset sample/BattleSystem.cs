@@ -18,6 +18,13 @@ public class BattleSystem : MonoBehaviour
 
 	public Text dialogueText;
 
+	// Shows a running history of what's happened this battle, e.g.
+	// "(The Rock attacked Player for 5)". Assign a Text object in the
+	// Inspector; leave it empty if you don't want logging yet.
+	public Text battleLogText;
+	private List<string> logMessages = new List<string>();
+	private const int maxLogLines = 6;
+
 	public BattleHUD playerHUD;
 	public BattleHUD enemyHUD;
 
@@ -26,6 +33,19 @@ public class BattleSystem : MonoBehaviour
 	// Set by the UI when the player taps a card button (see OnCardButton).
 	private int playerSelectedCard = -1;
 	private bool playerHasSelected = false;
+
+	// Appends a line to the battle log, dropping the oldest line once
+	// maxLogLines is exceeded so the text box doesn't grow forever.
+	void AddLog(string message)
+	{
+		logMessages.Add(message);
+
+		if (logMessages.Count > maxLogLines)
+			logMessages.RemoveAt(0);
+
+		if (battleLogText != null)
+			battleLogText.text = string.Join("\n\n", logMessages);
+	}
 
 	void Start()
 	{
@@ -41,7 +61,8 @@ public class BattleSystem : MonoBehaviour
 		GameObject enemyGO = Instantiate(enemyPrefab, enemyBattleStation);
 		enemyUnit = enemyGO.GetComponent<Unit>();
 
-		dialogueText.text = "A wild " + enemyUnit.unitName + " approaches...";
+		dialogueText.text = enemyUnit.unitName + " 의/가 등장!";
+		AddLog( enemyUnit.unitName + " 등장!");
 
 		playerHUD.SetHUD(playerUnit);
 		enemyHUD.SetHUD(enemyUnit);
@@ -57,7 +78,7 @@ public class BattleSystem : MonoBehaviour
 		playerHasSelected = false;
 		playerSelectedCard = -1;
 
-		dialogueText.text = "Choose your attack:";
+		dialogueText.text = " 공격 선택:";
 
 		playerHUD.ShowHand(playerUnit.GetHand(), OnCardButton);
 	}
@@ -87,14 +108,15 @@ public class BattleSystem : MonoBehaviour
 		int enemyCard = enemyUnit.ChooseRandomCard();
 		int playerCard = playerSelectedCard;
 
-		dialogueText.text = playerUnit.unitName + " plays " + playerCard +
-			", " + enemyUnit.unitName + " plays " + enemyCard + "!";
+		dialogueText.text = playerUnit.unitName  + playerCard+ " 의 공격!   " + enemyUnit.unitName + " 는 " + enemyCard + " 의 공격!";
 		yield return new WaitForSeconds(1.5f);
 
 		// Same number: total whiff, no damage, both cards already spent.
 		if (playerCard == enemyCard)
 		{
-			dialogueText.text = "Both attacks collide and cancel out!";
+			dialogueText.text = " 쌍방 공격으로 무효화!";
+			AddLog("(" + playerUnit.unitName + " 와 " + enemyUnit.unitName +
+				" 양측의 " + playerCard + " 공격은 쌍방 공격으로 무효화!)");
 			yield return new WaitForSeconds(1.5f);
 			BeginSelectionPhase();
 			yield break;
@@ -111,7 +133,8 @@ public class BattleSystem : MonoBehaviour
 
 		if (secondUnit.IsDead())
 		{
-			dialogueText.text = secondUnit.unitName + " was defeated before it could act!";
+			dialogueText.text = secondUnit.unitName + " 가 행동전에 사망!";
+			AddLog("(" + secondUnit.unitName + " 가 행동전에 사망!)");
 			yield return new WaitForSeconds(1.5f);
 			EndBattle(secondUnit);
 			yield break;
@@ -133,7 +156,9 @@ public class BattleSystem : MonoBehaviour
 
 	IEnumerator ApplyAttack(Unit attacker, Unit defender, int cardValue)
 	{
-		dialogueText.text = attacker.unitName + " attacks for " + cardValue + "!";
+		dialogueText.text = attacker.unitName + " 의 공격" + cardValue + "! ";
+		AddLog("(" + attacker.unitName +" 가" + defender.unitName+ "에개 " +cardValue + " 만큼 공격!  )");
+
 		defender.TakeDamage(cardValue);
 
 		if (defender == playerUnit)
@@ -149,12 +174,14 @@ public class BattleSystem : MonoBehaviour
 		if (defeatedUnit == enemyUnit)
 		{
 			state = BattleState.WON;
-			dialogueText.text = "You won the battle!";
+			dialogueText.text = "승리!";
+			AddLog("(" + enemyUnit.unitName + " 패배 - 승리했습니다!)");
 		}
 		else
 		{
 			state = BattleState.LOST;
-			dialogueText.text = "You were defeated.";
+			dialogueText.text = "패배";
+			AddLog("(" + playerUnit.unitName + " 가 승리 - 패배했다...)");
 		}
 	}
 }

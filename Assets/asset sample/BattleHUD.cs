@@ -8,6 +8,7 @@ public class BattleHUD : MonoBehaviour
 	public Text nameText;
 	public Text levelText;
 	public Slider hpSlider;
+	public Text hpText; // shows "25/25" next to the slider
 
 	// Optional: a parent container where card buttons get spawned for this
 	// unit's hand. Only really needed on the player's HUD, but harmless to
@@ -21,11 +22,17 @@ public class BattleHUD : MonoBehaviour
 		levelText.text = "Lvl " + unit.unitLevel;
 		hpSlider.maxValue = unit.maxHP;
 		hpSlider.value = unit.currentHP;
+
+		if (hpText != null)
+			hpText.text = unit.currentHP + "/" + unit.maxHP;
 	}
 
 	public void SetHP(int hp)
 	{
 		hpSlider.value = hp;
+
+		if (hpText != null)
+			hpText.text = hp + "/" + (int)hpSlider.maxValue;
 	}
 
 	// Spawns one button per card currently in hand. Pass in the callback the
