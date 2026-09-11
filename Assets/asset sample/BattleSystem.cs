@@ -59,9 +59,7 @@ public class BattleSystem : MonoBehaviour
 
 		dialogueText.text = "Choose your attack:";
 
-		// UI should call RefreshHandButtons() (or similar) here to draw
-		// buttons for playerUnit.GetHand() - left out of this sketch since
-		// it depends on your button prefab setup.
+		playerHUD.ShowHand(playerUnit.GetHand(), OnCardButton);
 	}
 
 	// Wire this up to each of the 6 card buttons, passing the card's number.
@@ -75,6 +73,8 @@ public class BattleSystem : MonoBehaviour
 
 		playerSelectedCard = cardNumber;
 		playerHasSelected = true;
+
+		playerHUD.ClearHand();
 
 		StartCoroutine(ResolveTurn());
 	}
