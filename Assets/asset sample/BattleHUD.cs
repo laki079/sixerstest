@@ -16,6 +16,29 @@ public class BattleHUD : MonoBehaviour
 	public Transform handContainer;
 	public GameObject cardButtonPrefab; // a simple Button + Text prefab
 
+	// Highlight color used while it's this unit's turn to pick a card.
+	// The "off" color is captured automatically from whatever's already
+	// on the panel's Image, so you don't need to manually match it.
+	public Color activeTurnColor = new Color(1f, 0.85f, 0.4f);
+	private Image panelBackground;
+	private Color normalColor;
+
+	void Awake()
+	{
+		panelBackground = GetComponent<Image>();
+		if (panelBackground != null)
+			normalColor = panelBackground.color;
+	}
+
+	// Call with true when it's this member's turn to choose, false otherwise.
+	public void SetActiveTurn(bool isActive)
+	{
+		if (panelBackground == null)
+			return;
+
+		panelBackground.color = isActive ? activeTurnColor : normalColor;
+	}
+
 	public void SetHUD(Unit unit)
 	{
 		nameText.text = unit.unitName;
