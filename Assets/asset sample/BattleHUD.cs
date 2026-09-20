@@ -20,6 +20,14 @@ public class BattleHUD : MonoBehaviour
 	// The "off" color is captured automatically from whatever's already
 	// on the panel's Image, so you don't need to manually match it.
 	public Color activeTurnColor = new Color(1f, 0.85f, 0.4f);
+
+	// Highlight color used while this HUD is a clickable attack target.
+	public Color targetableColor = new Color(0.6f, 1f, 0.6f);
+
+	// A Button component on this same HUD panel, used for click-to-target.
+	// Assign it in the Inspector on enemy HUDs (party HUDs don't need it).
+	public Button selfButton;
+
 	private Image panelBackground;
 	private Color normalColor;
 
@@ -37,6 +45,23 @@ public class BattleHUD : MonoBehaviour
 			return;
 
 		panelBackground.color = isActive ? activeTurnColor : normalColor;
+	}
+
+	// Makes this HUD clickable as an attack target while targetable is true.
+	// onSelected fires once when clicked; pass null/false to disable again.
+	public void SetTargetable(bool targetable, System.Action onSelected)
+	{
+		if (panelBackground != null)
+			panelBackground.color = targetable ? targetableColor : normalColor;
+
+		if (selfButton == null)
+			return;
+
+		selfButton.interactable = targetable;
+		selfButton.onClick.RemoveAllListeners();
+
+		if (targetable && onSelected != null)
+			selfButton.onClick.AddListener(() => onSelected());
 	}
 
 	public void SetHUD(Unit unit)

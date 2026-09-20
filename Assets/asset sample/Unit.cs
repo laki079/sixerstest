@@ -20,6 +20,12 @@ public class Unit : MonoBehaviour
 	// The card this unit chose for the current turn (set during selection phase).
 	public int ChosenCard { get; private set; }
 
+	// Which enemy this unit is attacking this round. Only meaningful for
+	// party members (each enemy still picks its own random target in
+	// BattleSystem.ChooseEnemyTarget). Just a plain settable field - no
+	// deck logic involved, BattleSystem sets this during target selection.
+	public Unit ChosenTarget { get; set; }
+
 	void Awake()
 	{
 		ResetHand();

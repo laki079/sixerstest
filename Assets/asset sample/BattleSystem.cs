@@ -17,13 +17,13 @@ public class BattleSystem : MonoBehaviour
 
 	private List<Unit> playerParty = new List<Unit>();
 
-	// --- Enemy setup (still just 1 for now; see ChooseEnemyTarget/EnemyParty
-	// note below for how this would extend to multiple enemies later) ---
-	public GameObject enemyPrefab;
-	public Transform enemyBattleStation;
-	public BattleHUD enemyHUD;
+	// --- Enemy party setup ---
+	// Same pattern as the player side: one entry per enemy, same order.
+	public List<GameObject> enemyPrefabs = new List<GameObject>();
+	public List<Transform> enemyBattleStations = new List<Transform>();
+	public List<BattleHUD> enemyHUDs = new List<BattleHUD>();
 
-	private Unit enemyUnit;
+	private List<Unit> enemyParty = new List<Unit>();
 
 	public Text dialogueText;
 
@@ -60,6 +60,16 @@ public class BattleSystem : MonoBehaviour
 			battleLogText.text = string.Join("\n\n", logMessages);
 	}
 
+	List<Unit> AlivePartyMembers()
+	{
+		return playerParty.Where(u => !u.IsDead()).ToList();
+	}
+
+	List<Unit> AliveEnemies()
+	{
+		return enemyParty.Where(u => !u.IsDead()).ToList();
+	}
+
 	void Start()
 	{
 		state = BattleState.START;
@@ -69,6 +79,7 @@ public class BattleSystem : MonoBehaviour
 	IEnumerator SetupBattle()
 	{
 		playerParty.Clear();
+		enemyParty.Clear();
 
 		for (int i = 0; i < playerPrefabs.Count; i++)
 		{
@@ -78,12 +89,22 @@ public class BattleSystem : MonoBehaviour
 			playerHUDs[i].SetHUD(unit);
 		}
 
-		GameObject enemyGO = Instantiate(enemyPrefab, enemyBattleStation);
-		enemyUnit = enemyGO.GetComponent<Unit>();
-		enemyHUD.SetHUD(enemyUnit);
+		List<string> enemyNames = new List<string>();
+		for (int i = 0; i < enemyPrefabs.Count; i++)
+		{
+			GameObject go = Instantiate(enemyPrefabs[i], enemyBattleStations[i]);
+			Unit unit = go.GetComponent<Unit>();
+			enemyParty.Add(unit);
+			enemyHUDs[i].SetHUD(unit);
+			enemyNames.Add(unit.unitName);
+		}
 
-		dialogueText.text = "A wild " + enemyUnit.unitName + " approaches...";
-		AddLog("A wild " + enemyUnit.unitName + " approaches.");
+		string introText = enemyNames.Count == 1
+			? "적 파티 " + enemyNames[0] + "이(가) 나타났다..."
+			: "적 파티 등장: " + string.Join(", ", enemyNames) + "!";
+
+		dialogueText.text = introText;
+		AddLog(introText);
 
 		yield return new WaitForSeconds(2f);
 
@@ -97,16 +118,16 @@ public class BattleSystem : MonoBehaviour
 		PromptNextPartyMemberSelection();
 	}
 
-	// Walks through the party one at a time asking for a card. Nobody's
-	// attack actually happens yet - this just collects everyone's choice
-	// (each unit's ChosenCard) before ResolveRound() runs them all together.
+	// Walks through the party one at a time: pick a target, then pick a
+	// card. Nobody's attack actually happens yet - this just collects
+	// everyone's choices before ResolveRound() runs them all together.
 	void PromptNextPartyMemberSelection()
 	{
 		// Skip any party members who are already dead.
 		while (selectionIndex < playerParty.Count && playerParty[selectionIndex].IsDead())
 			selectionIndex++;
 
-		// Turn off every highlight first, then light up just the current one.
+		// Turn off every party highlight first, then light up just the current one.
 		for (int i = 0; i < playerHUDs.Count; i++)
 			playerHUDs[i].SetActiveTurn(false);
 
@@ -117,13 +138,55 @@ public class BattleSystem : MonoBehaviour
 		}
 
 		Unit currentMember = playerParty[selectionIndex];
-		dialogueText.text = currentMember.unitName + ", choose your attack:";
-
 		playerHUDs[selectionIndex].SetActiveTurn(true);
 
+		PromptTargetSelection(currentMember);
+	}
+
+	// Step 1 of a party member's turn: click an enemy HUD to target it.
+	void PromptTargetSelection(Unit member)
+	{
+		dialogueText.text = member.unitName + ", 공격할 대상을 선택:";
+
+		for (int i = 0; i < enemyParty.Count; i++)
+		{
+			Unit enemy = enemyParty[i];
+			bool canTarget = !enemy.IsDead();
+
+			if (canTarget)
+			{
+				enemyHUDs[i].SetTargetable(true, () => OnEnemyTargetChosen(member, enemy));
+			}
+			else
+			{
+				enemyHUDs[i].SetTargetable(false, null);
+			}
+		}
+	}
+
+	void OnEnemyTargetChosen(Unit member, Unit target)
+	{
+		if (state != BattleState.SELECTION)
+			return;
+
+		member.ChosenTarget = target;
+
+		// Turn off targeting on every enemy HUD now that a choice was made.
+		foreach (BattleHUD hud in enemyHUDs)
+			hud.SetTargetable(false, null);
+
+		PromptCardSelection(member);
+	}
+
+	// Step 2 of a party member's turn: pick a card from their hand.
+	void PromptCardSelection(Unit member)
+	{
+		dialogueText.text = member.unitName + "이(가) " + member.ChosenTarget.unitName +
+			"에세 공격!:";
+
 		int capturedIndex = selectionIndex; // avoid closure bug
-		playerHUDs[capturedIndex].ShowHand(currentMember.GetHand(),
-			(cardNumber) => OnCardButton(currentMember, capturedIndex, cardNumber));
+		playerHUDs[capturedIndex].ShowHand(member.GetHand(),
+			(cardNumber) => OnCardButton(member, capturedIndex, cardNumber));
 	}
 
 	// Wired up per-party-member via the lambda above.
@@ -147,7 +210,7 @@ public class BattleSystem : MonoBehaviour
 	// without touching anything else in ResolveRound().
 	Unit ChooseEnemyTarget()
 	{
-		List<Unit> aliveMembers = playerParty.Where(u => !u.IsDead()).ToList();
+		List<Unit> aliveMembers = AlivePartyMembers();
 		int index = Random.Range(0, aliveMembers.Count);
 		return aliveMembers[index];
 	}
@@ -158,7 +221,7 @@ public class BattleSystem : MonoBehaviour
 
 		List<BattleAction> actions = new List<BattleAction>();
 
-		// Every living party member attacks the enemy.
+		// Every living party member attacks the target they picked.
 		foreach (Unit member in playerParty)
 		{
 			if (member.IsDead())
@@ -167,24 +230,31 @@ public class BattleSystem : MonoBehaviour
 			actions.Add(new BattleAction
 			{
 				actor = member,
-				target = enemyUnit,
+				target = member.ChosenTarget,
 				cardValue = member.ChosenCard
 			});
 		}
 
-		// Enemy attacks one random living party member.
-		Unit enemyTarget = ChooseEnemyTarget();
-		int enemyCard = enemyUnit.ChooseRandomCard();
-		actions.Add(new BattleAction
+		// Every living enemy attacks its own independently-chosen random target.
+		foreach (Unit enemy in enemyParty)
 		{
-			actor = enemyUnit,
-			target = enemyTarget,
-			cardValue = enemyCard
-		});
+			if (enemy.IsDead())
+				continue;
+
+			Unit target = ChooseEnemyTarget();
+			int card = enemy.ChooseRandomCard();
+
+			actions.Add(new BattleAction
+			{
+				actor = enemy,
+				target = target,
+				cardValue = card
+			});
+		}
 
 		// Whiff rule: ANY two (or more) actions sharing the same card
 		// number all cancel, regardless of who's attacking whom - even
-		// two party members who both happened to play the same number.
+		// two units on the same side who both happened to play the same number.
 		var groupedByValue = actions.GroupBy(a => a.cardValue);
 		foreach (var group in groupedByValue)
 		{
@@ -209,8 +279,8 @@ public class BattleSystem : MonoBehaviour
 			// Target died earlier this round - attack has nothing to hit.
 			if (action.target.IsDead())
 			{
-				dialogueText.text = action.actor.unitName + "'s attack finds no target!";
-				AddLog("(" + action.actor.unitName + "'s attack fizzled - target already down)");
+				dialogueText.text = action.actor.unitName + "의 공격이 대상을 찾지 못했습니다!";
+				AddLog("(" + action.actor.unitName + "의 공격이 빗나갔습니다 - 대상이 이미 쓰러짐)");
 				yield return new WaitForSeconds(1f);
 				continue;
 			}
@@ -222,8 +292,8 @@ public class BattleSystem : MonoBehaviour
 				{
 					var collidingGroup = orderedActions.Where(a => a.cardValue == action.cardValue && a.whiffed);
 					string names = string.Join(", ", collidingGroup.Select(a => a.actor.unitName));
-					dialogueText.text = "Attacks collide and cancel out!";
-					AddLog("(" + names + " all played " + action.cardValue + " - attacks cancelled)");
+					dialogueText.text = "공격이 서로 충돌하여 무효화되었습니다!";
+					AddLog("(" + names + "이(가) 모두 " + action.cardValue + "번을 선택하여 공격이 무효화되었습니다)");
 
 					foreach (var a in collidingGroup)
 						loggedWhiffGroups.Add(a);
@@ -235,13 +305,13 @@ public class BattleSystem : MonoBehaviour
 
 			yield return ApplyAttack(action.actor, action.target, action.cardValue);
 
-			if (enemyUnit.IsDead())
+			if (AliveEnemies().Count == 0)
 			{
 				EndBattle(true);
 				yield break;
 			}
 
-			if (playerParty.All(u => u.IsDead()))
+			if (AlivePartyMembers().Count == 0)
 			{
 				EndBattle(false);
 				yield break;
@@ -253,21 +323,22 @@ public class BattleSystem : MonoBehaviour
 
 	IEnumerator ApplyAttack(Unit attacker, Unit defender, int cardValue)
 	{
-		dialogueText.text = attacker.unitName + " attacks " + defender.unitName + " for " + cardValue + "!";
-		AddLog("(" + attacker.unitName + " attacked " + defender.unitName +
-			" for " + cardValue + ")");
+		dialogueText.text = attacker.unitName + "이(가) " + defender.unitName + "에게 " + cardValue + "의 피해를 입혔습니다!";
+		AddLog("(" + attacker.unitName + "이(가) " + defender.unitName +
+			"에게 " + cardValue + "의 피해를 입혔습니다)");
 
 		defender.TakeDamage(cardValue);
 
-		if (defender == enemyUnit)
+		int enemyIndex = enemyParty.IndexOf(defender);
+		if (enemyIndex >= 0)
 		{
-			enemyHUD.SetHP(enemyUnit.currentHP);
+			enemyHUDs[enemyIndex].SetHP(defender.currentHP);
 		}
 		else
 		{
-			int index = playerParty.IndexOf(defender);
-			if (index >= 0)
-				playerHUDs[index].SetHP(defender.currentHP);
+			int playerIndex = playerParty.IndexOf(defender);
+			if (playerIndex >= 0)
+				playerHUDs[playerIndex].SetHP(defender.currentHP);
 		}
 
 		yield return new WaitForSeconds(1.5f);
@@ -278,14 +349,14 @@ public class BattleSystem : MonoBehaviour
 		if (playerWon)
 		{
 			state = BattleState.WON;
-			dialogueText.text = "You won the battle!";
-			AddLog("(" + enemyUnit.unitName + " was defeated - you win!)");
+			dialogueText.text = "전투에서 승리했습니다!";
+			AddLog("(모든 적을 물리쳤습니다 - 승리!)");
 		}
 		else
 		{
 			state = BattleState.LOST;
-			dialogueText.text = "Your party was defeated.";
-			AddLog("(Your party was defeated - you lose!)");
+			dialogueText.text = "파티가 전멸했습니다.";
+			AddLog("(파티가 전멸했습니다 - 패배)");
 		}
 	}
 }
